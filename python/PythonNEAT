@@ -1,0 +1,1845 @@
+# Import dependencies
+import numpy as np
+import copy
+
+class Population:
+    '''
+    The neural network part of the Neuroevolution of Augmenting Topologies algorithm.
+        Methods:
+            self.update_library()
+            library_count = self.library_size()
+            print(self)
+            population_count = self.population_size()
+            output_array = self.evaluate_all(input_array)
+            self.next_generation(fitness)
+            species_in_population, species_average_fitness = self.species_average_fitness(fitness_array)
+            species_in_population, species_max_fitness = self.species_max_fitness(fitness_array)
+            self.replace_network(network_index, fitness_array = [])
+            self.best_network
+            
+    '''
+
+    # Functions to be used internally by the population (private)
+    
+    def __init__(self, n_input, n_output, initial_pop_size, max_pop_size = 100, pop_growth_rate = 0.08, kill_percent = 0.4, \
+                 p_breed = 0.04, species_protection = 3, activation_scale = 4.9, activation_type = 0, \
+                 library_flag = 1, p_purge = 0.02, purge_percent = 0.8, default_p_adjust_all = 0.21, \
+                 default_p_add_node = 0.05, default_p_add_edge = 0.4, default_p_adjust_one = 0.3, default_scale = 0.3):
+        '''
+        Initialize the population to have inital_pop_size random initial networks.
+            Inputs:
+                n_input: number of input nodes
+                n_output: number of output nodes
+                inital_pop_size:initial number of networks to have in the population
+                max_pop_size: maximum number of networks to have in the population (default value of 100)
+                pop_growth_rate: parameter to control how fast the population grows (default value of 0.08)
+                kill_percent: percent of the population that don't have children in next generation (default value of 0.4)
+                p_breed: probability that a network will breed instead of mutate when making child networks (default value of 0.04)
+                species_protection: number of generations a new species is guaranteed not to go extinct, not protected in a purge (default value of 3)
+                activation_scale: the horizontal scale to use in the activation function (default value of 4.9)
+                activation_type: use hyperbolic tangent if 0, sigmoid if 1 (default value of 0)
+                library_flag: sorts and exports the library of network labels if 1 (default value of 1)
+                p_purge: probability of a purge occuring on a new generation (default value of 0.02)
+                purge_percent: percent of population to remove in a purge, replaces kill_percent when purge occurs (default value of 0.8)
+                default_p_adjust_all: probability of adjusting all the weights in the network (default value of 0.21)
+                default_p_add_node: probability of adding a node, repeats until fail (default value of 0.05)
+                default_p_add_edge: probability of adding an edge, repeats until fail (default value of 0.4)
+                default_p_adjust_one: probability of adjusting a random one the weights in the network, repeats until fail (default value of 0.3)
+                default_scale: adjust weights between -scale and +scale (default value of 0.3)
+            Outputs:
+                N/A
+        '''
+        
+        # Error checking of inputs
+        if type(n_input) is not int:
+            raise TypeError('The value for n_input must be an integer.')
+        else:
+            if n_input <= 0:
+                raise ValueError('The value for n_input must be positive.')
+            if n_input == float('inf'):
+                raise ValueError('The value for n_input must be finite.')
+        
+        if type(n_output) is not int:
+            raise TypeError('The value for n_output must be an integer.')
+        else:
+            if n_output <= 0:
+                raise ValueError('The value for n_output must be positive.')
+            if n_output == float('inf'):
+                raise ValueError('The value for n_output must be finite.')
+        
+        if type(initial_pop_size) is not int:
+            raise TypeError('The value for initial_pop_size must be an integer.')
+        else:
+            if initial_pop_size <= 0:
+                raise ValueError('The value for initial_pop_size must be positive.')
+            if initial_pop_size == float('inf'):
+                raise ValueError('The value for initial_pop_size must be finite.')
+            
+        if type(max_pop_size) is not int:
+            raise TypeError('The value for max_pop_size must be an integer.')
+        else:
+            if max_pop_size <= 0:
+                raise ValueError('The value for max_pop_size must be positive.')
+            if max_pop_size == float('inf'):
+                raise ValueError('The value for max_pop_size must be finite.')
+            if max_pop_size < initial_pop_size:
+                raise ValueError('The maximum population size is smaller than the initial.')
+        
+        if (type(pop_growth_rate) is not float) and (type(pop_growth_rate) is not int):
+            raise TypeError('The value for pop_growth_rate must be a float or int.')
+        else:
+            if pop_growth_rate < 0:
+                raise ValueError('The value pop_growth_rate must be non-negative.')
+            if pop_growth_rate == float('inf'):
+                raise ValueError('The value for pop_growth_rate must be finite.')
+        
+        if (type(kill_percent) is not float) and (type(kill_percent) is not int):
+            raise TypeError('The value for kill_percent must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (kill_percent < 0) or (kill_percent >= 1):
+                raise ValueError('The value for kill_percent must be float greater than or equal to 0 and less than 1.')
+        
+        if (type(p_breed) is not float) and (type(p_breed) is not int):
+            raise TypeError('The value for p_breed must be float greater than or equal to 0 and less than or equal to 1.')
+        else:
+            if (p_breed < 0) or (p_breed > 1):
+                raise ValueError('The value for p_breed must be float greater than or equal to 0 and less than or equal to 1.')
+        
+        if type(activation_scale) is not float:
+            raise TypeError('The value for activation_scale must be a float value.')
+        else:
+            if activation_scale <= 0:
+                raise ValueError('The value for activation_scale must be positive.')
+            if activation_scale == float('inf'):
+                raise ValueError('The value for activation_scale must be finite.')
+        
+        if (type(activation_type) is not float) and (type(activation_type) is not int):
+            raise TypeError('The value for activation_type must be a float or int value.')
+        else:
+            if (activation_type != 0) and (activation_type != 1):
+                raise ValueError('The value for activation_type must be 0 (for tanh) or 1 (for sigmoid).')
+            
+        if type(library_flag) is not int:
+            raise TypeError('The value for library_flag must be an int value.')
+        else:
+            if (library_flag != 0) and (library_flag != 1):
+                raise ValueError('The value for library_flag must be 0 or 1.')
+
+        if (type(p_purge) is not float) and (type(p_purge) is not int):
+            raise TypeError('The value for p_purge must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (p_purge < 0) or (p_purge > 1):
+                raise ValueError('The value for p_purge must be float greater than or equal to 0 and less than or equal to 1.')
+
+        if (type(purge_percent) is not float) and (type(purge_percent) is not int):
+            raise TypeError('The value for purge_percent must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (purge_percent < 0) or (purge_percent >= 1):
+                raise ValueError('The value for default_purge_percent must be float greater than or equal to 0 and less than 1.')
+
+        if (type(default_p_adjust_all) is not float) and (type(default_p_adjust_all) is not int):
+            raise TypeError('The value for default_p_adjust_all must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (default_p_adjust_all < 0) or (default_p_adjust_all >= 1):
+                raise ValueError('The value for default_p_adjust_all must be float greater than or equal to 0 and less than 1.')
+        
+        if (type(default_p_add_node) is not float) and (type(default_p_add_node) is not int):
+            raise TypeError('The value for default_p_add_node must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (default_p_add_node < 0) or (default_p_add_node >= 1):
+                raise ValueError('The value for default_p_add_node must be float greater than or equal to 0 and less than 1.')
+        
+        if (type(default_p_add_edge) is not float) and (type(default_p_add_edge) is not int):
+            raise TypeError('The value for default_p_add_edge must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (default_p_add_edge < 0) or (default_p_add_edge >= 1):
+                raise ValueError('The value for default_p_add_edge must be float greater than or equal to 0 and less than 1.')
+        
+        if (type(default_p_adjust_one) is not float) and (type(default_p_adjust_one) is not int):
+            raise TypeError('The value for default_p_adjust_one must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (default_p_adjust_one < 0) or (default_p_adjust_one >= 1):
+                raise ValueError('The value for default_p_adjust_one must be float greater than or equal to 0 and less than 1.')
+        
+        if (type(default_scale) is not float) and (type(default_scale) is not int):
+            raise TypeError('The value for default_scale must be float greater than or 0.')
+        else:
+            if default_scale <= 0:
+                raise ValueError('The value for default_scale must be float greater than 0.')
+            if default_scale == float('inf'):
+                raise ValueError('The value for default_scale must be finite.')
+        
+        # Store number of inputs, outputs and total nodes and other parameters of the network
+        self.n_input = n_input
+        self.n_output = n_output
+        self.initial_pop_size = initial_pop_size
+        self.max_pop_size = max_pop_size
+        self.pop_growth_rate = pop_growth_rate
+        self.kill_percent = kill_percent
+        self.p_breed = p_breed
+        self.species_protection = species_protection
+        self.activation_scale = activation_scale
+        self.activation_type = activation_type
+        self.library_flag = library_flag
+        self.p_purge = p_purge
+        self.purge_percent = purge_percent
+
+        # Store the default mutation parameters
+        self.p_adjust_all = default_p_adjust_all
+        self.p_add_node = default_p_add_node
+        self.p_add_edge = default_p_add_edge
+        self.p_adjust_one = default_p_adjust_one
+        self.scale = default_scale
+        
+        # Create the inital networks
+        self.network_population = []
+        for i in range(initial_pop_size):
+            self.network_population.append(Network(self.n_input, self.n_output, activation_scale = self.activation_scale, activation_type = self.activation_type, \
+                    default_p_adjust_all = self.p_adjust_all, default_p_add_node = self.p_add_node, default_p_add_edge = self.p_add_edge, default_p_adjust_one = self.p_adjust_one, default_scale = self.scale))
+            
+        # Update the library of species in the population
+        self.library = []
+        self.update_library()
+
+        # Store the best network in the population
+        self.best_network = []
+        
+    def update_library(self):
+        '''
+        Update the library of species of networks in the population over time. The library is a numpy array with
+        three columns, the first being the label of a species, the second being how many generations that
+        species has appeared in, and the third being if that species is currently in the population.
+            Inputs:
+                N/A
+            Outputs:
+                N/A
+        '''
+
+        # Update the network counts for those currently in the population
+        added_this_update = []
+        for network in self.network_population:
+            if self.library_size() == 0:
+                self.library = [[network.species, 1, 'Alive']]
+                added_this_update.append(network.species)
+            else:
+                if network.species not in added_this_update:
+                    found_species = float('inf')
+                    for i in range(self.library_size()):
+                        if self.library[i][0] == network.species:
+                            found_species = i
+                            break
+                    if found_species != float('inf'):
+                        self.library[found_species][1] += 1
+                        self.library[found_species][2] = 'Alive'
+                    else:
+                        new_row = [network.species, 1, 'Alive']
+                        self.library.append(new_row)
+                    added_this_update.append(network.species)
+        
+        # Mark the networks that are not in the population
+        for i in range(self.library_size()):
+            if self.library[i][0] not in added_this_update:
+                self.library[i][2] = 'Extinct'
+
+        # Sort the library by number of generation appearances, if self.library_flag = 1
+        if self.library_flag == 1:
+            self.library = sorted(self.library, key = lambda entry: (entry[2], entry[1]))
+                    
+    def library_size(self):
+        '''
+        Returns the number of networks in the library.
+            Inputs:
+                N/A
+            Outpus:
+                library_count: number of networks in the library
+        '''
+        
+        library_count = len(self.library)
+        return library_count
+            
+    def __str__(self):
+        '''
+        Print number of inputs, number of outputs and number of networks in the population. Also exports the library to library.txt.
+        This function is called by the print command.
+            Inputs:
+                N/A
+            Outputs:
+                N/A
+        '''
+        
+        print('IMPORTANT POPULATION PARAMETERS:')
+        print('Number of inputs for each network: %d' % self.n_input)
+        print('Number of outputs for each network: %d' % self.n_output)
+        print('Number of networks in the population: %d' % self.population_size())
+
+        # Export the library if self.library_flag = 1
+        if self.library_flag == 1:
+            fileID = open('library.txt', 'w')
+            for i in range(self.library_size()):
+                fileID.write(str(self.library[i]))
+                if i < self.library_size():
+                    fileID.write('\n')
+            fileID.close()
+        
+        return ''
+    
+    # Functions to be called explicitly by the user (public)
+    
+    def population_size(self):
+        '''
+        Returns the number of networks in the population.
+            Inputs:
+                N/A
+            Outpus:
+                population_count: number of networks in the population
+        '''
+        
+        population_count = len(self.network_population)
+        return population_count
+    
+    def evaluate_all(self, input_array):
+        '''
+        Evaluate each network in the population on a particular input.
+            Inputs:
+                input_array: a numpy array of size (1 x self.n_input), (self.n_input x 1) or (self.population_size() x self.n_input)
+            Outputs:
+                output_array: a numpy array of size (self.population_size() x self.n_output)        
+        '''
+        
+        # Error checking of inputs
+        if type(input_array) is not np.ndarray:
+            raise TypeError('The value for input_array must be a numpy array of size (1 x %d), (%d x 1) or (%d x %d).' % (self.n_input, self.n_input, self.population_size(), self.n_input))
+        else:
+            if (float('inf') in input_array) or (-float('inf') in input_array):
+                raise ValueError('The values in input_array must be finite.')
+            row_col = input_array.shape
+            if len(row_col) == 1:
+                if row_col[0] != self.n_input:
+                    raise ValueError('The value for input_array must be a numpy array of size (1 x %d), (%d x 1) or (%d x %d).' % (self.n_input, self.n_input, self.population_size(), self.n_input))
+            elif len(row_col) == 2:
+                if row_col[0] == 1:
+                    if row_col[1] == self.n_input:
+                        # Make into 1D array
+                        old_input_array = copy.deepcopy(input_array)
+                        input_array = np.zeros(self.n_input)
+                        for i in range(self.n_input):
+                            input_array[i] = old_input_array[0, i]
+                    else:
+                        raise ValueError('The value for input_array must be a numpy array of size (1 x %d), (%d x 1) or (%d x %d).' % (self.n_input, self.n_input, self.population_size(), self.n_input))
+                elif row_col[0] == self.population_size():
+                    if row_col[1] != self.n_input:
+                        raise ValueError('The value for input_array must be a numpy array of size (1 x %d), (%d x 1) or (%d x %d).' % (self.n_input, self.n_input, self.population_size(), self.n_input))
+                elif row_col[1] == 1:
+                    if row_col[0] == self.n_input:
+                        # Make into 1D array
+                        old_input_array = copy.deepcopy(input_array)
+                        input_array = np.zeros(self.n_input)
+                        for i in range(self.n_input):
+                            input_array[i] = old_input_array[i, 0]
+                    else:
+                        raise ValueError('The value for input_array must be a numpy array of size (1 x %d), (%d x 1) or (%d x %d).' % (self.n_input, self.n_input, self.population_size(), self.n_input))
+                else:
+                    raise ValueError('The value for input_array must be a numpy array of size (1 x %d), (%d x 1) or (%d x %d).' % (self.n_input, self.n_input, self.population_size(), self.n_input))
+            else:
+                raise ValueError('The value for input_array must be a numpy array of size (1 x %d), (%d x 1) or (%d x %d).' % (self.n_input, self.n_input, self.population_size(), self.n_input))
+
+        # Determine if the input is the same (1) or different (2) for each network
+        if len(input_array.shape) == 1:
+            input_type = 1
+        else:
+            input_type = 2
+        
+        # Feed to input to each network
+        output_array = np.zeros((0, self.n_output))
+        for i in range(self.population_size()):
+            network = self.network_population[i]
+            if input_type == 1:
+                network_input = input_array
+            else:
+                network_input = input_array[i]
+            output = network.evaluate(network_input)
+            output_array = np.vstack([output_array, output])
+        return output_array
+            
+    def next_generation(self, fitness_array):
+        '''
+        Create a new generation of networks given a fitness value for each network.
+            Inputs:
+                fitness_array: a numpy array of size (1 x self.population_size())
+            Outputs:
+                N/A
+        '''
+        
+        # Error checking of inputs
+        if type(fitness_array) is not np.ndarray:
+            raise TypeError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+        else:
+            if (float('inf') in fitness_array) or (-float('inf') in fitness_array):
+                raise ValueError('The values in fitness_array must be finite.')
+            row_col = fitness_array.shape
+            if len(row_col) == 1:
+                if row_col[0] != self.population_size():
+                    raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+            elif len(row_col) == 2:
+                if row_col[0] == 1:
+                    if row_col[1] == self.population_size():
+                        old_fitness_array = copy.deepcopy(fitness_array)
+                        fitness_array = np.zeros(self.population_size())
+                        for i in range(self.population_size()):
+                            fitness_array[i] = old_fitness_array[0, i]
+                    else:
+                        raise ValueError('The value for fitness must be a numpy array of size (1 x %d).' % self.population_size())
+                elif row_col[1] == 1:
+                    if row_col[0] == self.population_size():
+                        old_fitness_array = copy.deepcopy(fitness_array)
+                        fitness_array = np.zeros(self.population_size())
+                        for i in range(self.population_size()):
+                            fitness_array[i] = old_fitness_array[i, 0]
+                    else:
+                        raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+                else:
+                    raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+            else:
+                raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+
+        # Determine if a purge will occur
+        if np.random.rand() < self.p_purge:
+            purge_occurs = 1
+            percent_to_kill = self.purge_percent
+        else:
+            purge_occurs = 0
+            percent_to_kill = self.kill_percent
+        
+        # Determine the size of the population growth this generation
+        num_networks = self.population_size()
+        if self.pop_growth_rate > 0:
+            population_increase = int(self.pop_growth_rate*(self.max_pop_size - num_networks) + 1)
+        else:
+            population_increase = 0
+        if num_networks + population_increase > self.max_pop_size:
+            population_increase = self.max_pop_size - num_networks
+        new_pop_size = num_networks + population_increase
+            
+        # Determine which networks are protected and can't be removed (none protected in a purge)
+        protected_indices = []
+        unprotected_indices = []
+        max_fitness = np.amax(fitness_array)
+        for i in range(num_networks):
+            if fitness_array[i] == max_fitness:
+                protected_indices.append([i, fitness_array[i], 2])  # 2 for best network
+            else:
+                network = self.network_population[i]
+                species_index = float('inf')
+                for j in range(self.library_size()):
+                    if network.species == self.library[j][0]:
+                        species_index = j
+                        break
+                if species_index == float('inf'):
+                    raise Exception(' Network not found in library.')
+                else:
+                    if self.library[j][1] <= self.species_protection and purge_occurs == 0:
+                        protected_indices.append([i, fitness_array[i], 1])  # 1 for protected
+                    else:
+                        unprotected_indices.append([i, fitness_array[i], 0])  # 0 for unprotected
+        
+        # Determine the number of unprotected networks to remove, if possible
+        population_to_remove = int(num_networks*percent_to_kill)
+        if population_to_remove > len(unprotected_indices):
+            population_to_remove = len(unprotected_indices)
+            
+        # Sort the protected and unprotected lists, decreasing by fitness
+        protected_indices = sorted(protected_indices, key = lambda ind_fit_flag: ind_fit_flag[1], reverse = True)
+        unprotected_indices = sorted(unprotected_indices, key = lambda ind_fit_flag: ind_fit_flag[1], reverse = True)
+        
+        # Remove the worst unprotected networks, merge the lists
+        remaining_indices = []
+        for i in range(len(protected_indices)):
+            remaining_indices.append(protected_indices[i])
+        for i in range(len(unprotected_indices) - population_to_remove):
+            remaining_indices.append(unprotected_indices[i])
+        remaining_indices = sorted(remaining_indices, key = lambda ind_fit_flag: ind_fit_flag[1], reverse = True)
+        
+        # Compute how many children each network gets based on fitness, with protected networks having a guaranteed child
+        num_of_children_per = np.zeros(len(remaining_indices))
+        for i in range(len(remaining_indices)):
+            if remaining_indices[i][2] == 1:
+                num_of_children_per[i] = 1
+        while np.sum(num_of_children_per) < new_pop_size - 2:
+            num_of_children_per[np.random.randint(len(remaining_indices))] += 1
+
+        # Fix the order of the non-zero entries to be decreasing
+        non_zero_entries = []
+        for i in range(len(num_of_children_per)):
+            if num_of_children_per[i] > 0:
+                non_zero_entries.append(num_of_children_per[i])
+        non_zero_entries = sorted(non_zero_entries, reverse = True)
+        count_index = 0
+        for i in range(len(num_of_children_per)):
+            if num_of_children_per[i] > 0:
+                num_of_children_per[i] = non_zero_entries[count_index]
+                count_index += 1
+
+        # Fix the data type to be a list of int's
+        num_of_children_per = list(num_of_children_per)
+        for i in range(len(num_of_children_per)):
+            num_of_children_per[i] = int(num_of_children_per[i])        
+          
+        # Create the new population of networks, starting with a copy of the best performing network and a simplest network
+        simple_network = Network(self.n_input, self.n_output, activation_scale = self.activation_scale, activation_type = self.activation_type, \
+                    default_p_adjust_all = self.p_adjust_all, default_p_add_node = self.p_add_node, default_p_add_edge = self.p_add_edge, \
+                    default_p_adjust_one = self.p_adjust_one, default_scale = self.scale)
+        best_network = self.network_population[remaining_indices[0][0]]
+        new_network_population = [simple_network, best_network.clone()]
+        added_species = [simple_network.species, best_network.species]
+        for i in range(len(num_of_children_per)):
+            if num_of_children_per[i] > 0:
+                network = self.network_population[remaining_indices[i][0]]
+                error_correct = 0
+                if network.species not in added_species:
+                    base_network_mutate = network.clone()
+                    base_network_mutate.mutate(overwrite_p_add_node = 0, overwrite_p_add_edge = 0)
+                    new_network_population.append(base_network_mutate)
+                    added_species.append(network.species)
+                    error_correct = 1
+                for j in range(num_of_children_per[i] - error_correct):
+                    new_network = network.clone()
+                    # Breed and mutate normally if not protected, otherwise only adjsut weights
+                    if remaining_indices[i][2] != 1:
+                        if np.random.rand() < self.p_breed:
+                            other_network = self.network_population[remaining_indices[np.random.randint(len(remaining_indices))][0]]
+                            new_network_population.append(new_network + other_network)
+                        else:
+                            new_network.mutate()
+                            new_network_population.append(new_network)
+                    else:
+                        new_network.mutate(overwrite_p_add_node = 0, overwrite_p_add_edge = 0)
+                        new_network_population.append(new_network)
+
+        # Correct the error for if there are more than new_pop_size networks present
+        while len(new_network_population) > new_pop_size:
+            new_network_population.pop()
+        
+        # Replace the old population with the new one
+        self.network_population = new_network_population
+        
+        # Update the library of species in the population
+        self.update_library()
+
+        # Update the best netowork in the population
+        self.best_network = best_network.clone()
+
+    def species_average_fitness(self, fitness_array):
+        '''
+        Returns the average fitness for each species.
+            Inputs:
+                fitness_array: a numpy array of size (1 x self.population_size())
+            Outputs:
+                species_in_population: list of the species in the population
+                species_average_fitness: list of the average fitness of each species in the same order as species_in_population
+        '''
+
+        # Error checking of inputs
+        if type(fitness_array) is not np.ndarray:
+            raise TypeError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+        else:
+            if (float('inf') in fitness_array) or (-float('inf') in fitness_array):
+                raise ValueError('The values in fitness_array must be finite.')
+            row_col = fitness_array.shape
+            if len(row_col) == 1:
+                if row_col[0] != self.population_size():
+                    raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+            elif len(row_col) == 2:
+                if row_col[0] == 1:
+                    if row_col[1] == self.population_size():
+                        old_fitness_array = copy.deepcopy(fitness_array)
+                        fitness_array = np.zeros(self.population_size())
+                        for i in range(self.population_size()):
+                            fitness_array[i] = old_fitness_array[0, i]
+                    else:
+                        raise ValueError('The value for fitness must be a numpy array of size (1 x %d).' % self.population_size())
+                elif row_col[1] == 1:
+                    if row_col[0] == self.population_size():
+                        old_fitness_array = copy.deepcopy(fitness_array)
+                        fitness_array = np.zeros(self.population_size())
+                        for i in range(self.population_size()):
+                            fitness_array[i] = old_fitness_array[i, 0]
+                    else:
+                        raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+                else:
+                    raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+            else:
+                raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+
+        # Find the species in population, the total fitness of each species, and the total number of networks of each species
+        population_info = []        # three columns: species, total fitness, number of instances
+        for i in range(self.population_size()):
+            current_network = self.network_population[i]
+            current_species = current_network.species
+            # Search for the species in population_info
+            found = 0
+            for j in range(len(population_info)):
+                if population_info[j][0] == current_species:
+                    population_info[j][1] += fitness_array[i]
+                    population_info[j][2] += 1
+                    found = 1
+                    break
+            if found == 0:
+                population_info.append([current_species, fitness_array[i], 1])
+                
+        # Compute the species and the average fitness for each
+        species_in_population = []
+        species_average_fitness = []
+        for i in range(len(population_info)):
+            species_in_population.append(population_info[i][0])
+            species_average_fitness.append(population_info[i][1]/population_info[i][2])
+
+        # Return results
+        return species_in_population, species_average_fitness
+
+    def species_max_fitness(self, fitness_array):
+        '''
+        Returns the max fitness of a network for each species.
+            Inputs:
+                fitness_array: a numpy array of size (1 x self.population_size())
+            Outputs:
+                species_in_population: list of the species in the population
+                species_max_fitness: list of the maximum network fitness of each species in the same order as species_in_population
+        '''
+
+        # Error checking of inputs
+        if type(fitness_array) is not np.ndarray:
+            raise TypeError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+        else:
+            if (float('inf') in fitness_array) or (-float('inf') in fitness_array):
+                raise ValueError('The values in fitness_array must be finite.')
+            row_col = fitness_array.shape
+            if len(row_col) == 1:
+                if row_col[0] != self.population_size():
+                    raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+            elif len(row_col) == 2:
+                if row_col[0] == 1:
+                    if row_col[1] == self.population_size():
+                        old_fitness_array = copy.deepcopy(fitness_array)
+                        fitness_array = np.zeros(self.population_size())
+                        for i in range(self.population_size()):
+                            fitness_array[i] = old_fitness_array[0, i]
+                    else:
+                        raise ValueError('The value for fitness must be a numpy array of size (1 x %d).' % self.population_size())
+                elif row_col[1] == 1:
+                    if row_col[0] == self.population_size():
+                        old_fitness_array = copy.deepcopy(fitness_array)
+                        fitness_array = np.zeros(self.population_size())
+                        for i in range(self.population_size()):
+                            fitness_array[i] = old_fitness_array[i, 0]
+                    else:
+                        raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+                else:
+                    raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+            else:
+                raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d).' % self.population_size())
+
+        # Find the species in population, the maximum fitness of each species
+        population_info = []        # two columns: species, total fitness, number of instances
+        for i in range(self.population_size()):
+            current_network = self.network_population[i]
+            current_species = current_network.species
+            # Search for the species in population_info
+            found = 0
+            for j in range(len(population_info)):
+                if population_info[j][0] == current_species:
+                    population_info[j][1] = max([population_info[j][1], fitness_array[i]])
+                    found = 1
+                    break
+            if found == 0:
+                population_info.append([current_species, fitness_array[i], 1])
+                
+        # Compute the species and the average fitness for each
+        species_in_population = []
+        species_max_fitness = []
+        for i in range(len(population_info)):
+            species_in_population.append(population_info[i][0])
+            species_max_fitness.append(population_info[i][1])
+
+        # Return results
+        return species_in_population, species_max_fitness
+
+    def replace_network(self, network_index, fitness_array = [], replace_type = 0):
+        '''
+        Replace a specific network in the population. If no fitness_array provided, simply mutates the current network.
+        If fitness_array provided, has chance of being a simplest possible network, breading/mutating, or becoming an already
+        existing species (with probability of choice of species based on the average fitness of the species, then choice
+        of parent network in the species based on the fitness of the network in the species).
+            Inputs:
+                network_index: index of the network to be replaced
+                fitness_array: a numpy array of size (1 x self.population_size()) (default value of empty)
+                replace_type: based on max species fitness if 0, average species fitness if 1 (default value of 0)
+        '''
+
+        # Error checking of inputs
+        if (type(network_index) is not int):
+            raise TypeError('The value for network_index must be an int between 0 and %d.' % self.population_size() - 1)
+        else:
+            if (network_index < 0) or (network_index >= self.population_size()):
+                raise ValueError('The value for network_index must be an int between 0 and %d.' % self.population_size() - 1)
+            
+        if (type(fitness_array) is not list) and (type(fitness_array) is not np.ndarray):
+            raise TypeError('The value for fitness_array must be a numpy array of size (1 x %d) or an empty list.' % self.population_size())
+        else:
+            if type(fitness_array) is list:
+                if len(fitness_array) > 0:
+                    raise TypeError('The value for fitness_array must be a numpy array of size (1 x %d) or an empty list.' % self.population_size())
+            else:
+                if (float('inf') in fitness_array) or (-float('inf') in fitness_array):
+                    raise ValueError('The values in fitness_array must be finite.')
+                row_col = fitness_array.shape
+                if len(row_col) == 1:
+                    if row_col[0] != self.population_size():
+                        raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d) or an empty list.' % self.population_size())
+                elif len(row_col) == 2:
+                    if row_col[0] == 1:
+                        if row_col[1] == self.population_size():
+                            old_fitness_array = copy.deepcopy(fitness_array)
+                            fitness_array = np.zeros(self.population_size())
+                            for i in range(self.population_size()):
+                                fitness_array[i] = old_fitness_array[0, i]
+                        else:
+                            raise ValueError('The value for fitness must be a numpy array of size (1 x %d) or an empty list.' % self.population_size())
+                    elif row_col[1] == 1:
+                        if row_col[0] == self.population_size():
+                            old_fitness_array = copy.deepcopy(fitness_array)
+                            fitness_array = np.zeros(self.population_size())
+                            for i in range(self.population_size()):
+                                fitness_array[i] = old_fitness_array[i, 0]
+                        else:
+                            raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d) or an empty list.' % self.population_size())
+                    else:
+                        raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d) or an empty list.' % self.population_size())
+                else:
+                    raise ValueError('The value for fitness_array must be a numpy array of size (1 x %d) or an empty list.' % self.population_size())
+
+        if (type(replace_type) is not float) and (type(replace_type) is not int):
+            raise TypeError('The value for replace_type must be a float or int value.')
+        else:
+            if (replace_type != 0) and (replace_type != 1):
+                raise ValueError('The value for replace_type must be 0 (for max species fitness) or 1 (for average species fitness).')
+
+        # Update the best netowork in the population
+        if type(fitness_array) is np.ndarray:
+            best_fitness = -float('inf')
+            best_network = []
+            for i in range(self.population_size()):
+                if fitness_array[i] > best_fitness:
+                    best_fitness = fitness_array[i]
+                    best_network = self.network_population[i]
+        self.best_network = best_network.clone()
+
+        # Determine which type of network replacement method to use
+        rand_num = np.random.rand()
+        if type(fitness_array) is list:     # i.e. no fitness array provided
+            if rand_num < 0.2:
+                method_type = 1         # 20% chance of simplest possible network
+            else:
+                method_type = 2         # 80% chance of breeding/mutating
+        else:                               # fitness array provided
+            if rand_num < 0.1:
+                method_type = 1         # 10% chance of simplest possible network
+            elif rand_num < 0.55:
+                method_type = 2         # 45% chance of breeding/mutating
+            else:
+                method_type = 3         # 45% chance of switching to other species based on fitness
+
+        # Construct the replacement network
+        if method_type == 1:
+            # Simplest possible network
+            new_network = Network(self.n_input, self.n_output, activation_scale = self.activation_scale, \
+                                  activation_type = self.activation_type, default_p_adjust_all = self.p_adjust_all, \
+                                  default_p_add_node = self.p_add_node, default_p_add_edge = self.p_add_edge, \
+                                  default_p_adjust_one = self.p_adjust_one, default_scale = self.scale)
+        elif method_type == 2:
+            # Breed or mutate the old network
+            new_network = (self.network_population[network_index]).clone()
+            if np.random.rand() < self.p_breed:
+                other_network = self.network_population[np.random.randint(self.population_size())]
+                new_network = new_network + other_network
+            else:
+                new_network.mutate()
+        else:
+            # Turn the old network into an already existing species, with the probability of choice of species
+            # proportional to the max or average fitness of the species
+            # Select the species
+            if replace_type == 0:
+                species_in_population, species_fitness = self.species_max_fitness(fitness_array)
+            else:
+                species_in_population, species_fitness = self.species_average_fitness(fitness_array)
+            probability_ranges = np.hstack([np.array([0]), np.cumsum(species_fitness)/sum(species_fitness)])
+            rand_num = np.random.rand()
+            selected_species_index = 0
+            for i in range(len(species_in_population)):
+                if (rand_num >= probability_ranges[i]) and (rand_num < probability_ranges[i + 1]):
+                    selected_species_index = i
+                    break
+            # Search for a pre-existing network of this species
+            networks_in_selected_species = []
+            network_fitnesses = []
+            for i in range(self.population_size()):
+                if (self.network_population[i]).species == species_in_population[selected_species_index]:
+                    networks_in_selected_species.append(self.network_population[i])
+                    network_fitnesses.append(fitness_array[i])
+            # Select the parent network and mutate it
+            if replace_type == 0:       # if max fitness method, choose based on fitness within population
+                probability_ranges = np.hstack([np.array([0]), np.cumsum(network_fitnesses)/sum(network_fitnesses)])
+                rand_num = np.random.rand()
+                selected_network_index = 0
+                for i in range(len(networks_in_selected_species)):
+                    if (rand_num >= probability_ranges[i]) and (rand_num < probability_ranges[i + 1]):
+                        selected_network_index = i
+                        break
+                new_network = (networks_in_selected_species[i]).clone()
+            else:                       # if average fitness method, choose uniformly
+                new_network = (networks_in_selected_species[np.random.randint(len(networks_in_selected_species))]).clone()
+            new_network.mutate()
+
+        # Replace the old network with the new one
+        self.network_population[network_index] = new_network
+
+        # Update the library of species in the population
+        self.update_library()
+
+class Network:
+    '''
+    The neural network part of the Neuroevolution of Augmenting Topologies algorithm.
+        Methods:
+            self.change_weight_array(new_weight_array)
+            print(self)
+            new_network = self + other_network
+            new_network = other_network + self
+            threshold = self.compute_threshold()
+            self.adjust_all_edges(scale = 0.1)
+            self.adjust_random_edge(scale = 0.1)
+            self.add_edge(scale = 1)
+            self.add_node()
+            depthv2 = self.compute_depth()
+            node_labels = self.label_nodes()
+            species_label = self.label_species()
+            output_array = self.network_activation()
+            output_array = self.network_inverse_activation()
+            output_array = self.evaluate(input_array)
+            new_network = self.clone()
+            self.mutate(overwrite_p_adjust_all = float('inf'), overwrite_p_add_node = float('inf'), overwrite_p_add_edge = float('inf'), overwrite_p_adjust_one = float('inf'), overwrite_scale = float('inf'))
+            self.export()
+    '''
+
+    # Functions to be used internally by the network (private)
+    
+    def __init__(self, n_input, n_output, weight_array = [], activation_scale = 4.9, activation_type = 0, max_evaluation_step = 10, \
+                 default_p_adjust_all = 0.21, default_p_add_node = 0.05, default_p_add_edge = 0.4, default_p_adjust_one = 0.3, default_scale = 0.3):
+        '''
+        Initialize the neural network to have random initial weights, no hidden layer,
+        one bias node with constant input of 1, and all input nodes connected to all output nodes.
+            Inputs:
+                n_input: number of input nodes
+                n_output: number of output nodes
+                weight_array: the inital weighted numpy array of the network (default value of empty)
+                activation_scale: the horizontal scale to use in the activation function (default value of 4.9)
+                activation_type: use hyperbolic tangent if 0, sigmoid if 1 (default value of 0)
+                max_evaluation_step: maximum number of steps to wait for stabilization (default of 10)
+                default_p_adjust_all: probability of adjusting all the weights in the network (default value of 0.21)
+                default_p_add_node: probability of adding a node, repeats until fail (default value of 0.05)
+                default_p_add_edge: probability of adding an edge, repeats until fail (default value of 0.4)
+                default_p_adjust_one: probability of adjusting a random one the weights in the network, repeats until fail (default value of 0.3)
+                default_scale: adjust between -scale and +scale (default value of 0.3)
+            Outputs:
+                N/A
+        '''
+        
+        # Error checking of inputs
+        if type(n_input) is not int:
+            raise TypeError('The value for n_input must be an integer.')
+        else:
+            if n_input <= 0:
+                raise ValueError('The value for n_input must be positive.')
+            if n_input == float('inf'):
+                raise ValueError('The value for n_input must be finite.')
+        
+        if type(n_output) is not int:
+            raise TypeError('The value for n_output must be an integer.')
+        else:
+            if n_output <= 0:
+                raise ValueError('The value for n_output must be positive.')
+            if n_output == float('inf'):
+                raise ValueError('The value for n_output must be finite.')
+        
+        if (type(weight_array) is not list) and (type(weight_array) is not np.ndarray):
+            raise TypeError('The value for weight_array must be a square numpy array or an empty list.')
+        else:
+            if type(weight_array) is list:
+                if len(weight_array) > 0:
+                    raise ValueError('The value for weight_array is a list but must be empty.')
+            else:
+                if (float('inf') in weight_array) or (-float('inf') in weight_array):
+                    raise ValueError('The values in weight_array must be finite.')
+                row_col = weight_array.shape
+                if len(row_col) != 2:
+                    raise ValueError('The provided array is not two dimensional.')
+                row = row_col[0]
+                col = row_col[1]
+                if row != col:
+                    raise ValueError('The provided array for weight_array is not square.')
+                if row < n_input + n_output + 1:
+                    raise ValueError('The provided array for weight_array is too small, as there are more nodes than entries.')
+                for i in range(row):
+                    for j in range(n_input + 1):
+                        if weight_array[i, j] != 0:
+                            raise ValueError('There is an entry in weight_array that represents a connection going to an input node.')
+                for i in range(row):
+                    if (np.amax(np.abs(weight_array[i, :])) == 0) and (np.amax(np.abs(weight_array[:, i])) == 0):
+                        raise ValueError('The provided array for weight_array represents a network with a node without input or output.')
+        
+        if type(activation_scale) is not float:
+            raise TypeError('The value for activation_scale must be a float value.')
+        else:
+            if activation_scale <= 0:
+                raise ValueError('The value for activation_scale must be positive.')
+            if activation_scale == float('inf'):
+                raise ValueError('The value for activation_scale must be finite.')
+        
+        if type(activation_type) is not int:
+            raise TypeError('The value for activation_type must be a float value.')
+        else:
+            if (activation_type != 0) and (activation_type != 1):
+                raise ValueError('The value for activation_type must be 0 (for tanh) or 1 (for sigmoid).')
+        
+        if type(max_evaluation_step) is not int:
+            raise TypeError('The value for max_evaluation_step must be a float value.')
+        else:
+            if max_evaluation_step <= 0:
+                raise ValueError('The value for max_evaluation_step must be positive.')
+            if max_evaluation_step == float('inf'):
+                raise ValueError('The value for default_max_evaluation_step must be finite.')
+            
+        if (type(default_p_adjust_all) is not float) and (type(default_p_adjust_all) is not int):
+            raise TypeError('The value for default_p_adjust_all must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (default_p_adjust_all < 0) or (default_p_adjust_all >= 1):
+                raise ValueError('The value for default_p_adjust_all must be float greater than or equal to 0 and less than 1.')
+        
+        if (type(default_p_add_node) is not float) and (type(default_p_add_node) is not int):
+            raise TypeError('The value for default_p_add_node must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (default_p_add_node < 0) or (default_p_add_node >= 1):
+                raise ValueError('The value for default_p_add_node must be float greater than or equal to 0 and less than 1.')
+        
+        if (type(default_p_add_edge) is not float) and (type(default_p_add_edge) is not int):
+            raise TypeError('The value for default_p_add_edge must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (default_p_add_edge < 0) or (default_p_add_edge >= 1):
+                raise ValueError('The value for default_p_add_edge must be float greater than or equal to 0 and less than 1.')
+        
+        if (type(default_p_adjust_one) is not float) and (type(default_p_adjust_one) is not int):
+            raise TypeError('The value for default_p_adjust_one must be float greater than or equal to 0 and less than 1.')
+        else:
+            if (default_p_adjust_one < 0) or (default_p_adjust_one >= 1):
+                raise ValueError('The value for default_p_adjust_one must be float greater than or equal to 0 and less than 1.')
+        
+        if (type(default_scale) is not float) and (type(default_scale) is not int):
+            raise TypeError('The value for default_scale must be float greater than or 0.')
+        else:
+            if default_scale <= 0:
+                raise ValueError('The value for default_scale must be float greater than 0.')
+            if default_scale == float('inf'):
+                raise ValueError('The value for default_scale must be finite.')
+        
+        # Store number of inputs, outputs and total nodes and other parameters of the network
+        self.n_input = n_input
+        self.n_output = n_output
+        self.activation_scale = activation_scale
+        self.activation_type = activation_type
+        self.max_evaluation_step = max_evaluation_step
+
+        # Store the default mutation parameters
+        self.p_adjust_all = default_p_adjust_all
+        self.p_add_node = default_p_add_node
+        self.p_add_edge = default_p_add_edge
+        self.p_adjust_one = default_p_adjust_one
+        self.scale = default_scale
+        
+        # Initialize a random initial simplest network if no weight array provided
+        # Otherwise initialize using the provided values
+        if len(weight_array) == 0:      # should check, can be buggy
+            self.n_total = n_input + n_output + 1    # extra node because of bias node
+        
+            # Create a random initial weight array
+            # First n_input are user inputs, then is the bias, then the outputs, and finally the hiddens are added later
+            self.weight_array = np.zeros((self.n_total, self.n_total))
+            for i in range(n_input + 1):
+                for j in range(n_input + 1, self.n_total):
+                    self.weight_array[i, j] = 2*np.random.rand() - 1
+        
+            # Create an array to remember which nodes are inputs
+            self.input_array = np.zeros((self.n_total, self.n_total))
+            for i in range(n_input + 1):
+                self.input_array[i, i] = 1
+        
+            # Create an array to remember which nodes are outputs
+            self.output_array = np.zeros((self.n_total, self.n_total))
+            for i in range(n_input + 1, self.n_total):
+                self.output_array[i, i] = 1
+            
+            # Compute and store the threshold cutoff stability value for evalutation of the network
+            self.threshold = self.compute_threshold()
+        
+            # Label the nodes of the network
+            self.labels = self.label_nodes()
+            
+            # Label the network by species
+            self.species = self.label_species()
+        else:
+            self.change_weight_array(weight_array)
+
+    def change_weight_array(self, new_weight_array):
+        '''
+        Changes self.weight_array to new_weight_array. This assumes that new_weight_array represents
+        a network with the same number of inputs and outputs (i.e. same n_input and n_output), just
+        with different hidden layers.
+            Inputs:
+                new_weight_array: a numpy array representing a different network on the same input and output nodes
+            Outptus:
+                N/A
+        '''
+        
+        # Error checking of inputs
+        if type(new_weight_array) is not np.ndarray:
+            raise TypeError('The value for new_weight_array must be a square numpy array.')
+        else:
+            if (float('inf') in new_weight_array) or (-float('inf') in new_weight_array):
+                    raise ValueError('The values in new_weight_array must be finite.')
+            row_col = new_weight_array.shape
+            if len(row_col) != 2:
+                raise ValueError('The provided array is not two dimensional.')
+            row = row_col[0]
+            col = row_col[1]
+            if row != col:
+                raise ValueError('The provided array for new_weight_array is not square.')
+            if row < self.n_input + self.n_output + 1:
+                raise ValueError('The provided array for new_weight_array is too small, as there are more nodes than entries.')
+            for i in range(row):
+                for j in range(self.n_input + 1):
+                    if new_weight_array[i, j] != 0:
+                        raise ValueError('There is an entry in new_weight_array that represents a connection going to an input node.')
+            for i in range(row):
+                if (np.amax(np.abs(new_weight_array[i, :])) == 0) and (np.amax(np.abs(new_weight_array[:, i])) == 0):
+                    raise ValueError('The provided array for new_weight_array represents a network with a node without input or output.')
+        
+        # Update the total number of nodes
+        row_col_new = new_weight_array.shape
+        self.n_total = row_col_new[0]
+        
+        # Update the weight array
+        self.weight_array = new_weight_array
+        
+        # Update the input array
+        self.input_array = np.zeros((self.n_total, self.n_total))
+        for i in range(self.n_input + 1):
+            self.input_array[i, i] = 1
+            
+        # Update the output array
+        self.output_array = np.zeros((self.n_total, self.n_total))
+        for i in range(self.n_input + 1, self.n_input + self.n_output + 1):
+            self.output_array[i, i] = 1
+            
+        # Compute and store the threshold cutoff stability value for evalutation of the network
+        self.threshold = self.compute_threshold()
+        
+        # Label the nodes of the network
+        self.labels = self.label_nodes()
+        
+        # Label the network by species
+        self.species = self.label_species()
+    
+    def __str__(self):
+        '''
+        Print the weight array, node labels, and threshold of the network. This function is called by the print command.
+            Inputs:
+                N/A
+            Outputs:
+                N/A
+        '''
+        
+        print('IMPORTANT NETWORK PARAMETERS:')
+        print('Species label: %f' % self.species)
+        print('Stability threshold: %f' % self.threshold)
+        print('Weight array:')
+        print(self.weight_array)
+        print('Node labels:')
+        print(self.labels)
+        return ''
+    
+    def __add__(self, other):
+        '''
+        Combines two networks by identifying nodes with the same labels and combining edges by averaging their weights.
+        This function is called by overloading the + operator.
+            Inputs:
+                other: another Network class instance
+            Outputs:
+                child_network: the network obtained from combining self and other in this way
+        '''
+        
+        # Error checking of inputs
+        if (not isinstance(other, Network)):
+            raise TypeError('The overloaded + operator requires both sides to be Networks.')
+        else:
+            if self.n_input != other.n_input:
+                raise ValueError('The networks have different numbers of input nodes.')
+            if self.n_output != other.n_output:
+                raise ValueError('The networks have different numbers of output nodes.')
+        
+        # Compute the size of the child weight array by getting a list of the parent's unique node labels
+        # The fisrt row is the label
+        # The second row is the index of the label in the self (inf if not found)
+        # The third row is the index of the label in the other (inf if not found)
+        child_total = self.n_total
+        all_parent_labels = self.labels
+        for i in range(other.n_total):
+            if other.labels[i] not in all_parent_labels:
+                all_parent_labels = np.hstack([all_parent_labels, other.labels[i]])
+                child_total += 1
+
+        self_map = np.zeros(self.n_total)
+        for i in range(self.n_total):
+            for j in range(child_total):
+                if self.labels[i] == all_parent_labels[j]:
+                    self_map[i] = j
+                    break
+        other_map = np.zeros(other.n_total)
+        for i in range(other.n_total):
+            for j in range(child_total):
+                if other.labels[i] == all_parent_labels[j]:
+                    other_map[i] = j
+                    break
+        
+        # Compute the weight array for the child
+        child_weight_array = np.zeros((child_total, child_total))
+        for i in range(self.n_total):
+            for j in range(self.n_total):
+                child_weight_array[int(self_map[i]), int(self_map[j])] = self.weight_array[i, j]
+        for i in range(other.n_total):
+            for j in range(other.n_total):
+                if child_weight_array[int(other_map[i]), int(other_map[j])] == 0:
+                    child_weight_array[int(other_map[i]), int(other_map[j])] = other.weight_array[i, j]
+                else:
+                    if child_weight_array[int(other_map[i]), int(other_map[j])] + other.weight_array[i, j] != 0:
+                        child_weight_array[int(other_map[i]), int(other_map[j])] = 0.5*(child_weight_array[int(other_map[i]), int(other_map[j])] + other.weight_array[i, j])
+                    else:
+                        found_new_weight = 0
+                        while found_new_weight == 0:
+                            new_weight = 2*other.weight_array[i, j]*(2*np.random.rand() - 1)
+                            if new_weight != 0:
+                                found_new_weight = 1
+                        child_weight_array[int(other_map[i]), int(other_map[j])] = new_weight
+        
+        # Create the child network and return it
+        child_network = Network(self.n_input, self.n_output, child_weight_array, \
+                    default_p_adjust_all = self.p_adjust_all, default_p_add_node = self.p_add_node, default_p_add_edge = self.p_add_edge, default_p_adjust_one = self.p_adjust_one, default_scale = self.scale)
+        return child_network
+        
+    def __radd__(self, other):
+        '''
+        Reverse add, only implemented so that sum() can be used with networks. This function is called in the sum function.
+            Inputs:
+                other: another Network class instance, or 0 since sum begins with 0
+            Outputs:
+                Returns the same network if other = 0
+                Returns the child of self and other otherwise
+        '''
+        
+        # Error checking of inputs
+        if (not isinstance(other, Network)) and (not isinstance(other, int)) and (not isinstance(other, float)):
+            raise TypeError('The overloaded reverse + operator requires both sides to be Networks or one to be 0.')
+        else:
+            if isinstance(other, Network):
+                if self.n_input != other.n_input:
+                    raise ValueError('The networks have different numbers of input nodes.')
+                if self.n_output != other.n_output:
+                    raise ValueError('The networks have different numbers of output nodes.')
+            else:
+                if other != 0:
+                    raise ValueError('The other value for reverse add, if not a network, must be 0.')
+        
+        # Reverse the order of addition
+        if other == 0:
+            return self
+        else:
+            return self.__add__(other)
+            
+    def compute_threshold(self):
+        '''
+        Compute the threshold cutcoff value used in the evaluation of the network.
+            Inputs:
+                N/A
+            Outputs:
+                computed_threshold: the computed threshold
+        '''
+        
+        # Find the magnitudes of all non-zero entries in the weight array
+        non_zero_values = []
+        for i in range(self.n_total):
+            for j in range(self.n_total):
+                if self.weight_array[i, j] != 0:
+                    non_zero_values.append(np.abs(self.weight_array[i, j]))
+        
+        # Find the number of non-zero values, the smallest non-zero value,
+        # the average non-zero value, and the norm of this array 
+        non_zero_array = np.array(non_zero_values)
+        num_non_zero = len(non_zero_array)
+        min_non_zero = np.amin(non_zero_array)
+        ave_non_zero = np.mean(non_zero_array)
+        norm_non_zero = np.linalg.norm(non_zero_array)
+        
+        # Use these to compute a threshold value
+        threshold = 0.02*(np.log(num_non_zero + 1)*np.sqrt(min_non_zero*ave_non_zero) + norm_non_zero)
+        return threshold
+    
+    def adjust_all_edges(self, scale = 0.1):
+        '''
+        Randomly adjust all the non-zero weight values in self.weight_array.
+            Inputs:
+                scale: adjust between -scale and +scale (default value of 0.1)
+            Outputs:
+                N/A
+        '''
+        
+        # Error checking of inputs
+        if (type(scale) is not float) and (type(scale) is not int):
+            raise TypeError('The value for scale must be float greater than or 0.')
+        else:
+            if scale <= 0:
+                raise ValueError('The value for scale must be float greater than 0.')
+            if scale == float('inf'):
+                raise ValueError('The value for scale must be finite.')
+        
+        # Go though all edges (i.e. entries in the RHS of self.weight_array) and adjust randomly
+        for i in range(self.n_total):
+            for j in range(self.n_input + 1, self.n_total):
+                if self.weight_array[i, j] != 0:
+                    self.weight_array[i, j] += scale*(2*np.random.rand() - 1)
+                    
+        # Update the threshold cutoff stability value for evalutation of the network
+        self.threshold = self.compute_threshold()
+                    
+    def adjust_random_edge(self, scale = 0.1):
+        '''
+        Randomly adjust a random non-zero weight value in self.weight_array.
+            Inputs:
+                scale: adjust between -scale and +scale (default value of 0.1)
+            Outputs:
+                N/A
+        '''
+        
+        # Error checking of inputs
+        if (type(scale) is not float) and (type(scale) is not int):
+            raise TypeError('The value for scale must be float greater than or 0.')
+        else:
+            if scale <= 0:
+                raise ValueError('The value for scale must be float greater than 0.')
+            if scale == float('inf'):
+                raise ValueError('The value for scale must be finite.')
+        
+        # Find the indices of all non-zero entries in the RHS of self.weight_array
+        non_zero_indices = []
+        for i in range(self.n_total):
+            for j in range(self.n_input + 1, self.n_total):
+                if self.weight_array[i, j] != 0:
+                    non_zero_indices.append([i, j])
+        
+        # Randomly select a non-zero entry and adjust randomly
+        random_index = non_zero_indices[np.random.randint(len(non_zero_indices))]
+        i_0 = random_index[0]
+        j_0 = random_index[1]
+        self.weight_array[i_0, j_0] += scale*(2*np.random.rand() - 1)
+        
+        # Update the threshold cutoff stability value for evalutation of the network
+        self.threshold = self.compute_threshold()
+        
+    def add_edge(self, scale = 1):
+        '''
+        Add a random edge with weight between -scale and scale to the neural network if possible.
+            Inputs:
+                scale: adjust between -scale and +scale (default value of 1)
+            Outputs:
+                N/A
+        '''
+        
+        # Error checking of inputs
+        if (type(scale) is not float) and (type(scale) is not int):
+            raise TypeError('The value for scale must be float greater than or 0.')
+        else:
+            if scale <= 0:
+                raise ValueError('The value for scale must be float greater than 0.')
+            if scale == float('inf'):
+                raise ValueError('The value for scale must be finite.')
+        
+        # Find the indices of all zero entries in the RHS of self.weight_array
+        zero_indices = []
+        for i in range(self.n_total):
+            for j in range(self.n_input + 1, self.n_total):
+                if self.weight_array[i, j] == 0:
+                    zero_indices.append([i, j])
+                    
+        # Randomly select a zero entry and adjust randomly, if possible
+        if len(zero_indices) > 0:
+            random_index = zero_indices[np.random.randint(len(zero_indices))]
+            i_0 = random_index[0]
+            j_0 = random_index[1]
+            self.weight_array[i_0, j_0] += scale*(2*np.random.rand() - 1)
+        
+        # Update the threshold cutoff stability value for evalutation of the network
+        self.threshold = self.compute_threshold()
+        
+        # Label the nodes of the network
+        self.labels = self.label_nodes()
+        
+        # Label the network by species
+        self.species = self.label_species()
+        
+    def add_node(self):
+        '''
+        Add a single node to the network by splitting an edge. Note that if the target node of the
+        split edge has an outgoing edge, swap the indices of that node and the new one. The reason
+        is to make a canocial choice in labeling so that you don't get the same network (topologically)
+        with different labels
+            Inputs:
+                N/A
+            Outputs:
+                N/A
+        '''
+        
+        # Find the indices of all non-zero entries in the RHS of self.weight_array
+        non_zero_indices = []
+        for i in range(self.n_total):
+            for j in range(self.n_input + 1, self.n_total):
+                if self.weight_array[i, j] != 0:
+                    non_zero_indices.append([i, j])
+        
+        # Randomly select a non-zero entry as the edge to split
+        random_index = non_zero_indices[np.random.randint(len(non_zero_indices))]
+        i_0 = random_index[0]
+        j_0 = random_index[1]
+        
+        # Add a new row tot the bottom and a new column to the right of weight, input and output arrays
+        new_row = np.zeros((1, self.n_total))
+        new_column = np.zeros((self.n_total + 1, 1))
+        self.weight_array = np.vstack((self.weight_array, new_row))
+        self.weight_array = np.hstack((self.weight_array, new_column))
+        self.input_array = np.vstack((self.input_array, new_row))
+        self.input_array = np.hstack((self.input_array, new_column))
+        self.output_array = np.vstack((self.output_array, new_row))
+        self.output_array = np.hstack((self.output_array, new_column))
+        
+        # Add two new edges and remove the old one
+        self.weight_array[i_0, self.n_total] = self.weight_array[i_0, j_0]
+        self.weight_array[self.n_total, j_0] = 1
+        self.weight_array[i_0, j_0] = 0
+        
+        # Augment the counter for total number of edges by 1
+        self.n_total += 1
+        
+        # Update the threshold cutoff stability value for evalutation of the network
+        self.threshold = self.compute_threshold()
+        
+        # Label the nodes of the network
+        self.labels = self.label_nodes()
+        
+        # Label the network by species
+        self.species = self.label_species()
+        
+    def compute_depth(self):
+        '''
+        Compute the depth of each node, two different ways.
+        Depth v1 is the minimum of the minimum distances from each input node to that node
+        Depth v2 is the maximum of the minimum distances from each input node to that node
+            Inputs:
+                N/A
+            Outputs:
+                depth_v2
+        '''
+        
+        # Initialize the depth array, note that inf is just a placeholder for unreachable as computed thus far
+        node_depth = np.zeros((self.n_input + 1, self.n_total))
+        for i in range(self.n_input + 1):
+            for j in range(self.n_total):
+                node_depth[i, j] = float('inf')
+            node_depth[i, i] = 0
+        
+        # Compute the adjacency array from the weight array
+        adj_array = np.zeros((self.n_total, self.n_total))
+        for i in range(self.n_total):
+            for j in range(self.n_total):
+                if self.weight_array[i, j] != 0:
+                    adj_array[i, j] = 1
+        
+        # Start the depth computation loop
+        for i in range(self.n_input + 1):
+            depth = 1
+            update_flags = np.zeros(self.n_total)
+            stable_loop = 0
+            while stable_loop == 0:
+                update_occurred = 0
+                for j in range(self.n_total):
+                    if node_depth[i, j] == float('inf'):
+                        for k in range(self.n_total):
+                            if adj_array[k, j] == 1:
+                                if node_depth[i, k] != float('inf'):
+                                    if update_flags[k] == 0:
+                                        node_depth[i, j] = depth
+                                        update_flags[j] = 1
+                                        update_occurred = 1
+                if update_occurred == 0:
+                    if 1 in update_flags:
+                        depth += 1
+                        update_flags = np.zeros(self.n_total)
+                    else:
+                        stable_loop = 1
+        
+        # Find the two versions of node depth
+        depth_v1 = np.amin(node_depth, axis = 0)
+        for i in range(self.n_input + 1):
+            for j in range(self.n_total):
+                if node_depth[i, j] == float('inf'):
+                    node_depth[i, j] = -node_depth[i, j]
+        depth_v2 = np.amax(node_depth, axis = 0)
+
+        # Error check
+        if (float('inf') in depth_v2) or (-float('inf') in depth_v2):
+            self.export()
+            # Adj mat
+            adj_mat = np.zeros((self.n_total, self.n_total))
+            for i in range(self.n_total):
+                for j in range(self.n_total):
+                    if self.weight_array[i, j] != 0:
+                        adj_mat[i, j] = 1
+            print(adj_mat)
+            print(depth_v2)
+            raise ValueError('Error in depth calculation algorithm.')
+        
+        return depth_v2
+    
+    def label_nodes(self):
+        '''
+        Labels the nodes of the network. Uses the idea that R is not a finitely generated Z-module to get
+        unique labels for the hidden nodes. The tricky part is that the labels of the hidden nodes can't
+        depend on the index in self.weight_array. Instead, it uses the labels of the incoming nodes in
+        layers strictly lower than itself. If there are duplicates because of the same incoming nodes,
+        adjust by an irrational number not used previously (here, will be sqrt(3)).
+            Inputs:
+                N/A
+            Outputs:
+                node_labels: a numnpy array representing the labels for each node by index
+        '''
+        
+        # Create the irrational numbers to be used
+        depth_array = self.compute_depth()
+        max_depth = int(np.amax(depth_array))
+        depth_basis = np.zeros(max_depth)
+        depth_basis[0] = np.log(3)
+        for i in range(max_depth - 1):
+            depth_basis[i + 1] = np.log(depth_basis[i] + i + 3)
+            
+        # Create labels for the inputs and outputs, using different irration numbers
+        node_labels = np.zeros(self.n_total)
+        for i in range(self.n_input + self.n_output + 1):
+            node_labels[i] = float(i + 2)**(float(i + 1)/float(i + 2))
+            
+        # Label the hidden nodes, iterating by layer
+        for depth in range(1, max_depth + 1):
+            # Assign all at cuurent depth
+            current_depth_indices = []
+            for i in range(self.n_input + self.n_output + 1, self.n_total):
+                if depth_array[i] == depth:
+                    current_depth_indices.append(i)
+                    for j in range(self.n_total):
+                        if (depth_array[j] < depth) and (self.weight_array[j, i] != 0):
+                            node_labels[i] += node_labels[j]*depth_basis[int(depth_array[j])]
+            # Check for duplicates, remove if necessary
+            stable_loop = 0
+            while stable_loop == 0:
+                stable_loop = 1
+                for i in current_depth_indices:
+                    for j in current_depth_indices:
+                        if (i != j) and (node_labels[i] == node_labels[j]):
+                            stable_loop = 0
+                            node_labels[j] += 3**(0.5)
+                            
+        # Remove 0's that appear from node not having inputs from those below
+        for i in range(self.n_total):
+            if node_labels[i] == 0:
+                node_labels[i] = depth_array[i]
+        # Check for duplicates, remove if necessary
+        stable_loop = 0
+        while stable_loop == 0:
+            stable_loop = 1
+            for i in range(self.n_total):
+                for j in range(self.n_total):
+                    if (i != j) and (node_labels[i] == node_labels[j]):
+                        stable_loop = 0
+                        node_labels[j] += 3**(0.5)   
+        
+        # Error check
+        if 0 in node_labels:
+            self.export()
+            adj_mat = np.zeros((self.n_total, self.n_total))
+            for i in range(self.n_total):
+                for j in range(self.n_total):
+                    if self.weight_array[i, j] != 0:
+                        adj_mat[i, j] = 1
+            print(adj_mat)
+            print(depth_array)
+            print(depth_basis)
+            print(node_labels)
+            raise ValueError('Error in labels.')
+        
+        return node_labels
+    
+    def label_species(self):
+        '''
+        Create a label for the species of the network.
+            Inputs:
+                N/A
+            Outputs:
+                species_label: the label of the species that the network belongs to
+        '''
+        
+        # Sort the list of node labels
+        sorted_labels = copy.deepcopy(self.labels)
+        sorted_labels.sort()
+        
+        # Create the label
+        species_label = 0
+        for i in range(len(sorted_labels)):
+            species_label += sorted_labels[i]*(np.cos(i) + 1)
+            
+        return species_label
+    
+    def network_activation(self, input_array):
+        '''
+        The activation function of the network. Uses self.activation_scale for horizontal scale, and
+        self.activation_type for tanh for sigmoid.
+            Inputs:
+                input_array: a numpy array of of (1 x self.n_total)
+            Outputs:
+                output_array: the activation function applied to the input
+        '''
+        
+        # Error checking of inputs
+        if type(input_array) is not np.ndarray:
+            raise TypeError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_total)
+        else:
+            if (float('inf') in input_array) or (-float('inf') in input_array):
+                raise ValueError('The values in input must be finite.')
+            row_col = input_array.shape
+            if len(row_col) == 1:
+                if row_col[0] != self.n_total:
+                    raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_total)
+            elif len(row_col) == 2:
+                if row_col[0] == 1:
+                    if row_col[1] == self.n_total:
+                        old_input = copy.deepcopy(input_array)
+                        input_array = np.zeros(self.n_total)
+                        for i in range(self.n_total):
+                            input_array[i] = old_input[0, i]
+                    else:
+                        raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_total)
+                elif row_col[1] == 1:
+                    if row_col[0] == self.n_total:
+                        old_input = copy.deepcopy(input_array)
+                        input_array = np.zeros(self.n_total)
+                        for i in range(self.n_total):
+                            input_array[i] = old_input[i, 0]
+                    else:
+                        raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_total)
+                else:
+                    raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_total)
+            else:
+                raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_total)
+        
+        # Apply the activation function
+        if self.activation_type == 0:
+            output_array = np.tanh(self.activation_scale*input_array)       # hyperbolic tangent
+        else:
+            output_array = (np.tanh(self.activation_scale*input_array) + 1)/2   # sigmoid
+            
+        return output_array
+    
+    def network_inverse_activation(self, input_array):
+        '''
+        Undo the activation function of the network to display results of evaluation. Uses
+        self.activation_scale for horizontal scale, and self.activation_type for tanh for sigmoid.
+            Inputs:
+                input_array: a numpy array of of (1 x self.n_output)
+            Outputs:
+                output_array: the inverse activation function applied to the input
+        '''
+        
+        # Error checking of inputs
+        if type(input_array) is not np.ndarray:
+            raise TypeError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_output)
+        else:
+            if (float('inf') in input_array) or (-float('inf') in input_array):
+                raise ValueError('The values in input_array must be finite.')
+            row_col = input_array.shape
+            if len(row_col) == 1:
+                if row_col[0] != self.n_output:
+                    raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_output)
+            elif len(row_col) == 2:
+                if row_col[0] == 1:
+                    if row_col[1] == self.n_output:
+                        old_input = copy.deepcopy(input_array)
+                        input_array = np.zeros(self.n_output)
+                        for i in range(self.n_output):
+                            input_array[i] = old_input[0, i]
+                    else:
+                        raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_output)
+                elif row_col[1] == 1:
+                    if row_col[0] == self.n_output:
+                        old_input = copy.deepcopy(input_array)
+                        input_array = np.zeros(self.n_output)
+                        for i in range(self.n_output):
+                            input_array[i] = old_input[i, 0]
+                    else:
+                        raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_output)
+                else:
+                    raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_output)
+            else:
+                raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_output)
+        
+        # Apply the inverse activation function
+        if self.activation_type == 0:
+            # Correct for rounding errors
+            arctanh_input = input_array
+            for i in range(self.n_output):
+                if arctanh_input[i] >= 1:
+                    arctanh_input[i] = 0.99999
+                if arctanh_input[i] <= -1:
+                    arctanh_input[i] = -0.99999
+            # Evaluate
+            output_array = np.arctanh(arctanh_input)/self.activation_scale    # hyperbolic tangent
+        else:
+            # Correct for rounding errors
+            arctanh_input = 2*input_array - 1
+            for i in range(self.n_output):
+                if arctanh_input[i] >= 1:
+                    arctanh_input[i] = 0.99999
+                if arctanh_input[i] <= -1:
+                    arctanh_input[i] = -0.99999
+            # Evaluate
+            output_array = np.arctanh(arctanh_input)/self.activation_scale  # sigmoid
+            
+        # Return the result
+        return output_array
+
+    # Functions to be called explicitly by the user (public)
+
+    def evaluate(self, input_array):
+        '''
+        Evaluate the network on a particular input.
+            Inputs:
+                input_array: a numpy array of size (1 x self.n_input)
+            Outputs:
+                output_array: a numpy array of size (1 x self.n_output)        
+        '''
+        
+        # Error checking of inputs
+        if type(input_array) is not np.ndarray:
+            raise TypeError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_input)
+        else:
+            if (float('inf') in input_array) or (-float('inf') in input_array):
+                raise ValueError('The values in input_array must be finite.')
+            row_col = input_array.shape
+            if len(row_col) == 1:
+                if row_col[0] != self.n_input:
+                    raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_input)
+            elif len(row_col) == 2:
+                if row_col[0] == 1:
+                    if row_col[1] == self.n_input:
+                        old_input_array = copy.deepcopy(input_array)
+                        input_array = np.zeros(self.n_input)
+                        for i in range(self.n_input):
+                            input_array[i] = old_input_array[0, i]
+                    else:
+                        raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_input)
+                elif row_col[1] == 1:
+                    if row_col[0] == self.n_input:
+                        old_input_array = copy.deepcopy(input_array)
+                        input_array = np.zeros(self.n_input)
+                        for i in range(self.n_input):
+                            input_array[i] = old_input_array[i, 0]
+                    else:
+                        raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_input)
+                else:
+                    raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_input)
+            else:
+                raise ValueError('The value for input_array must be a numpy array of size (1 x %d).' % self.n_input)
+        
+        # Initialize the state array of each neural as the provided input value or 0
+        x_old = np.zeros((1, self.n_total))
+        x_new = copy.deepcopy(input_array)
+        x_new = np.append(x_new, [1])
+        while len(x_new) < self.n_total:
+            x_new = np.append(x_new, [0])
+            
+        # Loop the computations until they stabilize
+        stabilize_count = 1
+        while (np.linalg.norm(x_new - x_old) > self.threshold) and (stabilize_count <= self.max_evaluation_step):
+            x_old = copy.deepcopy(x_new)
+            x_new = np.dot(x_old, self.input_array) + self.network_activation(np.dot(x_old, self.weight_array))
+            stabilize_count += 1
+        
+        # Return the outputs, with the tanh undone
+        x_outs = np.dot(x_new, self.output_array)
+        output_values = []
+        for i in range(self.n_total):
+            if self.output_array[i, i] == 1:
+                output_values.append(x_outs[i])
+        output_array = self.network_inverse_activation(np.array(output_values))
+        return output_array
+
+    def clone(self):
+        '''
+        Creates a deep copy of the network, so that self can be copied and then modified without also
+        modifying the copy.
+            Inputs:
+                N/A
+            Outputs:
+                clone_network: a deepcopy of self
+        '''
+        
+        # Make a deepcopy
+        return copy.deepcopy(self)
+    
+    def mutate(self, overwrite_p_adjust_all = float('inf'), overwrite_p_add_node = float('inf'), overwrite_p_add_edge = float('inf'), overwrite_p_adjust_one = float('inf'), overwrite_scale = float('inf')):
+        '''
+        Mutate the network self by (potentially) adjusting all the weights, or by adding node(s),
+        edge(s), and adjusting weight(s). Always adjust at least one weight if no nodes or edges added.
+            Inputs:
+                overwrite_p_adjust_all: overwrite value for probability of adjusting all the weights in the network (default value of float('inf'))
+                overwrite_p_add_node: overwrite value for probability of adding a node, repeats until fail (default value of float('inf'))
+                overwrite_p_add_edge: overwrite value for probability of adding an edge, repeats until fail (default value of float('inf'))
+                doverwrite_p_adjust_one: overwrite value for probability of adjusting a random one the weights in the network, repeats until fail (default value of float('inf'))
+                overwrite_scale: overwrite value for adjust between -scale and +scale (default value of float('inf'))
+            Outputs:
+                N/A
+        '''
+
+        # Error checking of inputs
+        if (type(overwrite_p_adjust_all) is not float) and (type(overwrite_p_adjust_all) is not int):
+            raise TypeError('The value for overwrite_p_adjust_all must be float greater than or equal to 0 and less than 1, or float("inf").')
+        else:
+            if ((overwrite_p_adjust_all < 0) or (overwrite_p_adjust_all >= 1)) and (overwrite_p_adjust_all != float('inf')):
+                raise ValueError('The value for default_p_adjust_all must be float greater than or equal to 0 and less than 1, or float("inf").')
+        
+        if (type(overwrite_p_add_node) is not float) and (type(overwrite_p_add_node) is not int):
+            raise TypeError('The value for overwrite_p_add_node must be float greater than or equal to 0 and less than 1, or float("inf").')
+        else:
+            if ((overwrite_p_add_node < 0) or (overwrite_p_add_node >= 1)) and (overwrite_p_add_node != float('inf')):
+                raise ValueError('The value for overwrite_p_add_node must be float greater than or equal to 0 and less than 1, or float("inf").')
+        
+        if (type(overwrite_p_add_edge) is not float) and (type(overwrite_p_add_edge) is not int):
+            raise TypeError('The value for overwrite_p_add_edge must be float greater than or equal to 0 and less than 1, or float("inf").')
+        else:
+            if ((overwrite_p_add_edge < 0) or (overwrite_p_add_edge >= 1)) and (overwrite_p_add_edge != float('inf')):
+                raise ValueError('The value for overwrite_p_add_edge must be float greater than or equal to 0 and less than 1, or float("inf").')
+        
+        if (type(overwrite_p_adjust_one) is not float) and (type(overwrite_p_adjust_one) is not int):
+            raise TypeError('The value for overwrite_p_adjust_one must be float greater than or equal to 0 and less than 1, or float("inf").')
+        else:
+            if ((overwrite_p_adjust_one < 0) or (overwrite_p_adjust_one >= 1)) and (overwrite_p_adjust_one != float('inf')):
+                raise ValueError('The value for overwrite_p_adjust_one must be float greater than or equal to 0 and less than 1, or float("inf").')
+        
+        if (type(overwrite_scale) is not float) and (type(overwrite_scale) is not int):
+            raise TypeError('The value for overwrite_scale must be float greater than or 0, or float("inf").')
+        else:
+            if overwrite_scale <= 0:
+                raise ValueError('The value for overwrite_scale must be float greater than 0, or float("inf").')
+
+        # Assign the parameters
+        if overwrite_p_adjust_all == float('inf'):
+            p_adjust_all = self.p_adjust_all
+        else:
+            p_adjust_all = overwrite_p_adjust_all
+            
+        if overwrite_p_add_node == float('inf'):
+            p_add_node = self.p_add_node
+        else:
+            p_add_node = overwrite_p_add_node
+            
+        if overwrite_p_add_edge == float('inf'):
+            p_add_edge = self.p_add_edge
+        else:
+            p_add_edge = overwrite_p_add_edge
+            
+        if overwrite_p_adjust_one == float('inf'):
+            p_adjust_one = self.p_adjust_one
+        else:
+            p_adjust_one = overwrite_p_adjust_one
+        
+        if overwrite_scale == float('inf'):
+            scale = self.scale
+        else:
+            scale = scale
+        
+        # Create the random mutation
+        if np.random.rand() < p_adjust_all:
+            # Adjust all edges only
+            self.adjust_all_edges(scale)
+        else:
+            # Add nodes until test fails
+            nodes_added = 0
+            test_failed = 0
+            while test_failed == 0:
+                if np.random.rand() < p_add_node:
+                    self.add_node()
+                    nodes_added += 1
+                else:
+                    test_failed = 1
+                    
+            # Add edges until test fails
+            edges_added = 0
+            test_failed = 0
+            while test_failed == 0:
+                if np.random.rand() < p_add_edge:
+                    self.add_edge()
+                    edges_added += 1
+                else:
+                    test_failed = 1
+                    
+            # Change a single weight if no nodes or edges were added
+            weights_changed = 0
+            if (nodes_added == 0) and (edges_added == 0):
+                self.adjust_random_edge(scale)
+                weights_changed += 1
+            
+            # Randomly adjust one weight until test fails
+            test_failed = 0
+            while test_failed == 0:
+                if np.random.rand() < p_adjust_one:
+                    self.adjust_random_edge(scale)
+                    weights_changed += 1
+                else:
+                    test_failed = 1
+    
+    def export(self):
+        '''
+        Exports self.weight_array along with a row of input and output flags at the bottom.
+            Inputs:
+                N/A
+            Outputs:
+                N/A
+        '''
+
+        # Create the array to export
+        export_array = np.zeros((self.n_total + 2, self.n_total))
+        for i in range(self.n_total):
+            for j in range(self.n_total):
+                export_array[i, j] = self.weight_array[i, j]
+            export_array[self.n_total, i] = self.input_array[i, i]
+            export_array[self.n_total + 1, i] = self.output_array[i, i]
+        np.savetxt('PythonNEAT_export.txt', export_array)
